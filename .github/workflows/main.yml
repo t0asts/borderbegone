@@ -1,0 +1,43 @@
+name: CI
+
+on:
+  push:
+    branches: [ main ]
+  pull_request:
+    branches: [ main ]
+  workflow_dispatch:
+
+jobs:
+  build:
+    runs-on: windows-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup MSBuild
+        uses: microsoft/setup-msbuild@v2
+
+      - name: Configure VS env and build
+        shell: cmd
+        run: |
+          "%ProgramFiles(x86)%\Microsoft Visual Studio\Installer\vswhere.exe" -latest -requires Microsoft.Component.MSBuild -property installationPath > "%TEMP%\vsdir.txt"
+          set /p VS_DIR=<"%TEMP%\vsdir.txt"
+          if "%VS_DIR%"=="" (
+            echo Visual Studio not found
+            exit /b 1
+          )
+
+          call "%VS_DIR%\Common7\Tools\VsDevCmd.bat" -arch=x64 -host_arch=x64
+
+          msbuild "borderbegone.sln" /m /v:m ^
+            /p:Configuration=Release ^
+            /p:Platform=x64 ^
+            /p:PreferredToolArchitecture=x64
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: borderbegone-x64-Release
+          path: |
+            **\x64\Release\*.exe
