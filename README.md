@@ -1,0 +1,1 @@
+Silly tool I use to hide the title bar on MSI Afterburner's hardware monitor.
