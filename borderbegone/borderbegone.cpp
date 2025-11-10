@@ -12,410 +12,409 @@
 #pragma comment(lib, "dwmapi.lib")
 
 struct Args {
-    DWORD pid;
-    WCHAR procName[MAX_PATH];
-    WCHAR title[1024];
-    BOOL hasPid;
-    BOOL hasName;
-    BOOL hasTitle;
+	DWORD pid;
+	WCHAR procName[MAX_PATH];
+	WCHAR title[1024];
+	BOOL hasPid;
+	BOOL hasName;
+	BOOL hasTitle;
 };
 
 struct Window {
-    DWORD targetPid;
-    LPCWSTR targetTitle;
-    HWND found; 
+	DWORD targetPid;
+	LPCWSTR targetTitle;
+	HWND found;
 };
 
 static VOID ShowHelp()
 {
-    wprintf(
-        L"usage:\n"
-        L"borderbegone.exe -pid 1111 -title \"hardware monitor\"\n"
-        L"borderbegone.exe -name MSIAfterburner.exe -title \"hardware monitor\""
-    );
+	wprintf(
+		L"usage:\n"
+		L"borderbegone.exe -pid 1111 -title \"hardware monitor\"\n"
+		L"borderbegone.exe -name MSIAfterburner.exe -title \"hardware monitor\""
+	);
 }
 
 static BOOL StrCompare(LPCWSTR str1, LPCWSTR str2)
 {
-    return lstrcmpiW(str1, str2) == 0;
+	return lstrcmpiW(str1, str2) == 0;
 }
 
 static VOID FixQuotes(LPWSTR buf, SIZE_T size, LPCWSTR text)
 {
-    BOOL needQuotes = (wcspbrk(text, L" \t") != 0);
+	BOOL needQuotes = (wcspbrk(text, L" \t") != 0);
 
-    SIZE_T curr = wcslen(buf);
+	SIZE_T curr = wcslen(buf);
 
-    if (needQuotes && (curr + 1) < size) { 
-        buf[curr++] = L'\"';
-    }
+	if (needQuotes && (curr + 1) < size) {
+		buf[curr++] = L'\"';
+	}
 
-    for (SIZE_T i = 0; text[i] && (curr + 1) < size; ++i) { 
-        buf[curr++] = text[i];
-    }
+	for (SIZE_T i = 0; text[i] && (curr + 1) < size; ++i) {
+		buf[curr++] = text[i];
+	}
 
-    if (needQuotes && (curr + 1) < size) { 
-        buf[curr++] = L'\"';
-    }
+	if (needQuotes && (curr + 1) < size) {
+		buf[curr++] = L'\"';
+	}
 
-    if (curr < size) { 
-        buf[curr] = 0; 
-    }
+	if (curr < size) {
+		buf[curr] = 0;
+	}
 }
 
-static BOOL IsElevated() 
+static BOOL IsElevated()
 {
-    HANDLE token;
-    
-    if (!OpenProcessToken(GetCurrentProcess(), TOKEN_QUERY, &token)) { 
-        return FALSE; 
-    }
+	HANDLE token;
 
-    TOKEN_ELEVATION elevation{}; 
-    DWORD size = 0;
+	if (!OpenProcessToken(GetCurrentProcess(), TOKEN_QUERY, &token)) {
+		return FALSE;
+	}
 
-    BOOL tokenInfo = GetTokenInformation(token, TokenElevation, &elevation, sizeof(elevation), &size);
+	TOKEN_ELEVATION elevation{};
+	DWORD size = 0;
 
-    CloseHandle(token);
+	BOOL tokenInfo = GetTokenInformation(token, TokenElevation, &elevation, sizeof(elevation), &size);
 
-    return tokenInfo && elevation.TokenIsElevated;
+	CloseHandle(token);
+
+	return tokenInfo && elevation.TokenIsElevated;
 }
 
 static INT RunElevated()
 {
-    WCHAR path[MAX_PATH] = {};
+	WCHAR path[MAX_PATH] = {};
 
-    if (!GetModuleFileNameW(0, path, MAX_PATH)) { 
-        return 1; 
-    }
+	if (!GetModuleFileNameW(0, path, MAX_PATH)) {
+		return 1;
+	}
 
-    INT argc = 0;
+	INT argc = 0;
 
-    LPWSTR* argv = CommandLineToArgvW(GetCommandLineW(), &argc);
+	LPWSTR* argv = CommandLineToArgvW(GetCommandLineW(), &argc);
 
-    WCHAR params[32768] = {};
+	WCHAR params[32768] = {};
 
-    for (INT i = 1; i < argc; ++i) {
+	for (INT i = 1; i < argc; ++i) {
 
-        if (i > 1) {
-            wcscat_s(params, L" "); 
-        }
+		if (i > 1) {
+			wcscat_s(params, L" ");
+		}
 
-        FixQuotes(params, sizeof(params) / sizeof(params[0]), argv[i]);
-    }
+		FixQuotes(params, sizeof(params) / sizeof(params[0]), argv[i]);
+	}
 
-    if (argv) { 
-        LocalFree(argv); 
-    }
+	if (argv) {
+		LocalFree(argv);
+	}
 
-    HINSTANCE instance = ShellExecuteW(0, L"runas", path, (params[0] ? params : 0), 0, SW_SHOWNORMAL);
+	HINSTANCE instance = ShellExecuteW(0, L"runas", path, (params[0] ? params : 0), 0, SW_SHOWNORMAL);
 
-    if ((INT_PTR)instance <= 32) { 
-        wprintf(L"Failed to elevate: %p\n", instance);
-        return 1; 
-    }
+	if ((INT_PTR)instance <= 32) {
+		wprintf(L"Failed to elevate: %p\n", instance);
+		return 1;
+	}
 
-    return 0;
+	return 0;
 }
 
 static DWORD FindPidByName(LPCWSTR name)
 {
-    DWORD result = 0;
+	DWORD result = 0;
 
-    HANDLE snapshot = CreateToolhelp32Snapshot(TH32CS_SNAPPROCESS, 0);
+	HANDLE snapshot = CreateToolhelp32Snapshot(TH32CS_SNAPPROCESS, 0);
 
-    if (snapshot == INVALID_HANDLE_VALUE) { 
-        return 0; 
-    }
+	if (snapshot == INVALID_HANDLE_VALUE) {
+		return 0;
+	}
 
-    PROCESSENTRY32W entry = {}; 
-    entry.dwSize = sizeof(entry);
+	PROCESSENTRY32W entry = {};
+	entry.dwSize = sizeof(entry);
 
-    if (Process32FirstW(snapshot, &entry)) {
+	if (Process32FirstW(snapshot, &entry)) {
 
-        do { 
+		do {
 
-            if (StrCompare(entry.szExeFile, name)) { 
-                result = entry.th32ProcessID;
-                break; 
-            } 
-        } 
-        while (Process32NextW(snapshot, &entry));
-    }
+			if (StrCompare(entry.szExeFile, name)) {
+				result = entry.th32ProcessID;
+				break;
+			}
+		} while (Process32NextW(snapshot, &entry));
+	}
 
-    CloseHandle(snapshot);
+	CloseHandle(snapshot);
 
-    return result;
+	return result;
 }
 
 static BOOL CALLBACK EnumWindows(HWND hwnd, LPARAM param)
 {
-    Window* window = (Window*)param;
-    DWORD pid = 0;
+	Window* window = (Window*)param;
+	DWORD pid = 0;
 
-    GetWindowThreadProcessId(hwnd, &pid);
+	GetWindowThreadProcessId(hwnd, &pid);
 
-    if (pid != window->targetPid) { 
-        return TRUE; 
-    }
+	if (pid != window->targetPid) {
+		return TRUE;
+	}
 
-    if (!IsWindowVisible(hwnd) || GetParent(hwnd) != 0) { 
-        return TRUE; 
-    }
+	if (!IsWindowVisible(hwnd) || GetParent(hwnd) != 0) {
+		return TRUE;
+	}
 
-    WCHAR title[1024] = {};
+	WCHAR title[1024] = {};
 
-    if (!GetWindowTextW(hwnd, title, 1024) || title[0] == 0) { 
-        return TRUE; 
-    }
+	if (!GetWindowTextW(hwnd, title, 1024) || title[0] == 0) {
+		return TRUE;
+	}
 
-    if (StrStrIW(title, window->targetTitle)) {
-        window->found = hwnd;
-        return FALSE; 
-    }
+	if (StrStrIW(title, window->targetTitle)) {
+		window->found = hwnd;
+		return FALSE;
+	}
 
-    return TRUE;
+	return TRUE;
 }
 
 static HWND GetWindow(DWORD pid, LPCWSTR title)
 {
-    Window window = {};
-    window.targetPid = pid;
-    window.targetTitle = title;
-    window.found = 0;
+	Window window = {};
+	window.targetPid = pid;
+	window.targetTitle = title;
+	window.found = 0;
 
-    EnumWindows(EnumWindows, (LPARAM)&window);
+	EnumWindows(EnumWindows, (LPARAM)&window);
 
-    return window.found;
+	return window.found;
 }
 
 static VOID HideBorder(HWND hwnd)
 {
-    const DWORD none = DWMWA_COLOR_NONE;
+	const DWORD none = DWMWA_COLOR_NONE;
 
-    if (S_OK != DwmSetWindowAttribute(hwnd, DWMWA_BORDER_COLOR, &none, sizeof(none))) {
-        const COLORREF border = RGB(0, 0, 0);
-        DwmSetWindowAttribute(hwnd, DWMWA_BORDER_COLOR, &border, sizeof(border));
-    }
+	if (S_OK != DwmSetWindowAttribute(hwnd, DWMWA_BORDER_COLOR, &none, sizeof(none))) {
+		const COLORREF border = RGB(0, 0, 0);
+		DwmSetWindowAttribute(hwnd, DWMWA_BORDER_COLOR, &border, sizeof(border));
+	}
 }
 
 static VOID FixRendering(HWND hwnd)
 {
-    DWMNCRENDERINGPOLICY policy = DWMNCRP_DISABLED;
+	DWMNCRENDERINGPOLICY policy = DWMNCRP_DISABLED;
 
-    DwmSetWindowAttribute(hwnd, DWMWA_NCRENDERING_POLICY, &policy, sizeof(policy));
+	DwmSetWindowAttribute(hwnd, DWMWA_NCRENDERING_POLICY, &policy, sizeof(policy));
 
-    MARGINS margins = { 0, 0, 0, 0 };
-    
-    DwmExtendFrameIntoClientArea(hwnd, &margins);
+	MARGINS margins = { 0, 0, 0, 0 };
+
+	DwmExtendFrameIntoClientArea(hwnd, &margins);
 }
 
 static VOID DisablePeek(HWND hwnd)
 {
-    BOOL on = TRUE;
+	BOOL on = TRUE;
 
-    DwmSetWindowAttribute(hwnd, DWMWA_DISALLOW_PEEK, &on, sizeof(on));
-    DwmSetWindowAttribute(hwnd, DWMWA_EXCLUDED_FROM_PEEK, &on, sizeof(on));
+	DwmSetWindowAttribute(hwnd, DWMWA_DISALLOW_PEEK, &on, sizeof(on));
+	DwmSetWindowAttribute(hwnd, DWMWA_EXCLUDED_FROM_PEEK, &on, sizeof(on));
 }
 
 static BOOL FixWindowStyle(HWND hwnd)
 {
-    RECT rect;
-    
-    if (!GetWindowRect(hwnd, &rect)) { 
-        return FALSE; 
-    }
+	RECT rect;
 
-    LONG_PTR style = GetWindowLongPtrW(hwnd, GWL_STYLE);
-    LONG_PTR exStyle = GetWindowLongPtrW(hwnd, GWL_EXSTYLE);
+	if (!GetWindowRect(hwnd, &rect)) {
+		return FALSE;
+	}
 
-    style &= ~(WS_OVERLAPPED | WS_CAPTION | WS_THICKFRAME | WS_MINIMIZE | WS_MAXIMIZE | WS_SYSMENU);
-    style |= WS_POPUP;
+	LONG_PTR style = GetWindowLongPtrW(hwnd, GWL_STYLE);
+	LONG_PTR exStyle = GetWindowLongPtrW(hwnd, GWL_EXSTYLE);
 
-    exStyle &= ~(WS_EX_WINDOWEDGE | WS_EX_CLIENTEDGE | WS_EX_DLGMODALFRAME | WS_EX_STATICEDGE | WS_EX_APPWINDOW);
-    exStyle |= WS_EX_TOOLWINDOW;
+	style &= ~(WS_OVERLAPPED | WS_CAPTION | WS_THICKFRAME | WS_MINIMIZE | WS_MAXIMIZE | WS_SYSMENU);
+	style |= WS_POPUP;
 
-    SetWindowLongPtrW(hwnd, GWL_STYLE, style);
-    SetWindowLongPtrW(hwnd, GWL_EXSTYLE, exStyle);
+	exStyle &= ~(WS_EX_WINDOWEDGE | WS_EX_CLIENTEDGE | WS_EX_DLGMODALFRAME | WS_EX_STATICEDGE | WS_EX_APPWINDOW);
+	exStyle |= WS_EX_TOOLWINDOW;
 
-    FixRendering(hwnd);
-    HideBorder(hwnd);
-    DisablePeek(hwnd);
+	SetWindowLongPtrW(hwnd, GWL_STYLE, style);
+	SetWindowLongPtrW(hwnd, GWL_EXSTYLE, exStyle);
 
-    if (!SetWindowPos(hwnd, 0, rect.left, rect.top, (rect.right - rect.left), (rect.bottom - rect.top), SWP_NOZORDER | SWP_NOACTIVATE | SWP_FRAMECHANGED)) {
-        wprintf(L"SetWindowPos failed: %lu\n", GetLastError());
-        return FALSE;
-    }
+	FixRendering(hwnd);
+	HideBorder(hwnd);
+	DisablePeek(hwnd);
 
-    return TRUE;
+	if (!SetWindowPos(hwnd, 0, rect.left, rect.top, (rect.right - rect.left), (rect.bottom - rect.top), SWP_NOZORDER | SWP_NOACTIVATE | SWP_FRAMECHANGED)) {
+		wprintf(L"SetWindowPos failed: %lu\n", GetLastError());
+		return FALSE;
+	}
+
+	return TRUE;
 }
 
 static VOID RefocusWindow(HWND hwnd)
 {
-    if (IsIconic(hwnd)) { 
-        ShowWindow(hwnd, SW_RESTORE); 
-    }
-    else { 
-        ShowWindow(hwnd, SW_SHOW); 
-    }
+	if (IsIconic(hwnd)) {
+		ShowWindow(hwnd, SW_RESTORE);
+	}
+	else {
+		ShowWindow(hwnd, SW_SHOW);
+	}
 
-    HWND fgWindow = GetForegroundWindow();
+	HWND fgWindow = GetForegroundWindow();
 
-    DWORD fgThread = fgWindow ? GetWindowThreadProcessId(fgWindow, 0) : 0;
+	DWORD fgThread = fgWindow ? GetWindowThreadProcessId(fgWindow, 0) : 0;
 
-    DWORD targetThread = GetWindowThreadProcessId(hwnd, 0);
+	DWORD targetThread = GetWindowThreadProcessId(hwnd, 0);
 
-    if (fgThread && targetThread && fgThread != targetThread) {
-        AttachThreadInput(targetThread, fgThread, TRUE);
-    }
+	if (fgThread && targetThread && fgThread != targetThread) {
+		AttachThreadInput(targetThread, fgThread, TRUE);
+	}
 
-    SetWindowPos(hwnd, HWND_TOP, 0, 0, 0, 0, SWP_NOMOVE | SWP_NOSIZE);
-    SetForegroundWindow(hwnd);
-    SetActiveWindow(hwnd);
-    SetFocus(hwnd);
+	SetWindowPos(hwnd, HWND_TOP, 0, 0, 0, 0, SWP_NOMOVE | SWP_NOSIZE);
+	SetForegroundWindow(hwnd);
+	SetActiveWindow(hwnd);
+	SetFocus(hwnd);
 
-    if (fgThread && targetThread && fgThread != targetThread)
-        AttachThreadInput(targetThread, fgThread, FALSE);
+	if (fgThread && targetThread && fgThread != targetThread)
+		AttachThreadInput(targetThread, fgThread, FALSE);
 }
 
 static VOID RefreshWindow(HWND hwnd)
 {
-    RefocusWindow(hwnd);
-    ShowWindow(hwnd, SW_MINIMIZE);
+	RefocusWindow(hwnd);
+	ShowWindow(hwnd, SW_MINIMIZE);
 
-    DWORD ticks = GetTickCount();
+	DWORD ticks = GetTickCount();
 
-    while (!IsIconic(hwnd) && (GetTickCount() - ticks) < 500) {
-        Sleep(10); 
-    }
+	while (!IsIconic(hwnd) && (GetTickCount() - ticks) < 500) {
+		Sleep(10);
+	}
 
-    ShowWindow(hwnd, SW_RESTORE);
+	ShowWindow(hwnd, SW_RESTORE);
 
-    ticks = GetTickCount();
-    while (IsIconic(hwnd) && (GetTickCount() - ticks) < 500) {
-        Sleep(10); 
-    }
+	ticks = GetTickCount();
+	while (IsIconic(hwnd) && (GetTickCount() - ticks) < 500) {
+		Sleep(10);
+	}
 
-    SetWindowPos(hwnd, HWND_TOP, 0, 0, 0, 0, SWP_NOMOVE | SWP_NOSIZE);
-    SetForegroundWindow(hwnd);
-    SetActiveWindow(hwnd);
-    SetFocus(hwnd);
+	SetWindowPos(hwnd, HWND_TOP, 0, 0, 0, 0, SWP_NOMOVE | SWP_NOSIZE);
+	SetForegroundWindow(hwnd);
+	SetActiveWindow(hwnd);
+	SetFocus(hwnd);
 }
 
 static VOID InitArgs(Args* args)
 {
-    args->pid = 0;
-    args->procName[0] = 0;
-    args->title[0] = 0;
-    args->hasPid = FALSE;
-    args->hasName = FALSE;
-    args->hasTitle = FALSE;
+	args->pid = 0;
+	args->procName[0] = 0;
+	args->title[0] = 0;
+	args->hasPid = FALSE;
+	args->hasName = FALSE;
+	args->hasTitle = FALSE;
 }
 
 static BOOL ParseArgs(Args* args)
 {
-    InitArgs(args);
+	InitArgs(args);
 
-    INT argc = 0;
-    LPWSTR* argv = CommandLineToArgvW(GetCommandLineW(), &argc);
+	INT argc = 0;
+	LPWSTR* argv = CommandLineToArgvW(GetCommandLineW(), &argc);
 
-    if (!argv || argc < 2) {
+	if (!argv || argc < 2) {
 
-        if (argv) LocalFree(argv); { 
-            return FALSE; 
-        }
-    }
+		if (argv) LocalFree(argv); {
+			return FALSE;
+		}
+	}
 
-    for (INT i = 1; i < argc; ++i) {
-        LPCWSTR arg = argv[i];
-        if (StrCompare(arg, L"-pid") && (i + 1) < argc) {
-            args->pid = (DWORD)_wcstoui64(argv[++i], 0, 10);
-            args->hasPid = TRUE;
-        }
-        else if (StrCompare(arg, L"-name") && (i + 1) < argc) {
-            wcsncpy_s(args->procName, argv[++i], _TRUNCATE);
-            args->hasName = TRUE;
-        }
-        else if (StrCompare(arg, L"-title") && (i + 1) < argc) {
-            wcsncpy_s(args->title, argv[++i], _TRUNCATE);
-            args->hasTitle = TRUE;
-        }
-        else if (StrCompare(arg, L"-h") || StrCompare(arg, L"--help") || StrCompare(arg, L"/?")) {
+	for (INT i = 1; i < argc; ++i) {
+		LPCWSTR arg = argv[i];
+		if (StrCompare(arg, L"-pid") && (i + 1) < argc) {
+			args->pid = (DWORD)_wcstoui64(argv[++i], 0, 10);
+			args->hasPid = TRUE;
+		}
+		else if (StrCompare(arg, L"-name") && (i + 1) < argc) {
+			wcsncpy_s(args->procName, argv[++i], _TRUNCATE);
+			args->hasName = TRUE;
+		}
+		else if (StrCompare(arg, L"-title") && (i + 1) < argc) {
+			wcsncpy_s(args->title, argv[++i], _TRUNCATE);
+			args->hasTitle = TRUE;
+		}
+		else if (StrCompare(arg, L"-h") || StrCompare(arg, L"--help") || StrCompare(arg, L"/?")) {
 
-            if (argv) { 
-                LocalFree(argv); 
-                return FALSE; 
-            }
-        }
-    }
+			if (argv) {
+				LocalFree(argv);
+				return FALSE;
+			}
+		}
+	}
 
-    if (argv) { 
-        LocalFree(argv); 
-    }
+	if (argv) {
+		LocalFree(argv);
+	}
 
-    if (!args->hasTitle) { 
-        return FALSE; 
-    }
+	if (!args->hasTitle) {
+		return FALSE;
+	}
 
-    if (!(args->hasPid || args->hasName)) { 
-        return FALSE; 
-    }
+	if (!(args->hasPid || args->hasName)) {
+		return FALSE;
+	}
 
-    return TRUE;
+	return TRUE;
 }
 
 INT wmain()
 {
-    Args args;
+	Args args;
 
-    if (!ParseArgs(&args)) {
-        ShowHelp();
-        return 2;
-    }
+	if (!ParseArgs(&args)) {
+		ShowHelp();
+		return 2;
+	}
 
-    //need elevation to fix afterburner
-    if (!IsElevated()) {
-        return RunElevated();
-    }
+	//need elevation to fix afterburner
+	if (!IsElevated()) {
+		return RunElevated();
+	}
 
-    DWORD pid = args.hasPid ? args.pid : 0;
+	DWORD pid = args.hasPid ? args.pid : 0;
 
-    if (!pid && args.hasName) {
-        pid = FindPidByName(args.procName);
-        if (!pid) {
-            wprintf(L"Process not found: %s\n", args.procName);
-            return 3; 
-        }
-    }
+	if (!pid && args.hasName) {
+		pid = FindPidByName(args.procName);
+		if (!pid) {
+			wprintf(L"Process not found: %s\n", args.procName);
+			return 3;
+		}
+	}
 
-    HANDLE processHandle = OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, FALSE, pid);
+	HANDLE processHandle = OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, FALSE, pid);
 
-    if (!processHandle) {
-        wprintf(L"OpenProcess failed: PID: %lu Error: %lu\n", pid, GetLastError());
-        return 4; 
-    }
-    
-    wprintf(L"Opened process: PID: %lu\n", pid);
+	if (!processHandle) {
+		wprintf(L"OpenProcess failed: PID: %lu Error: %lu\n", pid, GetLastError());
+		return 4;
+	}
 
-    HWND window = GetWindow(pid, args.title);
+	wprintf(L"Opened process: PID: %lu\n", pid);
 
-    if (!window) {
-        wprintf(L"Window not found: PID: %lu Title: \"%s\"\n", pid, args.title);
-        CloseHandle(processHandle);
-        return 5;
-    }
+	HWND window = GetWindow(pid, args.title);
 
-    wprintf(L"Found window: 0x%p\n", window);
+	if (!window) {
+		wprintf(L"Window not found: PID: %lu Title: \"%s\"\n", pid, args.title);
+		CloseHandle(processHandle);
+		return 5;
+	}
 
-    if (!FixWindowStyle(window)) {
-        wprintf(L"Failed to update window styles\n");
-        CloseHandle(processHandle);
-        return 6;
-    }
+	wprintf(L"Found window: 0x%p\n", window);
 
-    RefocusWindow(window);
-    RefreshWindow(window);
+	if (!FixWindowStyle(window)) {
+		wprintf(L"Failed to update window styles\n");
+		CloseHandle(processHandle);
+		return 6;
+	}
 
-    CloseHandle(processHandle);
-    return 0;
+	RefocusWindow(window);
+	RefreshWindow(window);
+
+	CloseHandle(processHandle);
+	return 0;
 }
