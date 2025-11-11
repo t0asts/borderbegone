@@ -11,6 +11,17 @@
 #pragma comment(lib, "shlwapi.lib")
 #pragma comment(lib, "dwmapi.lib")
 
+#ifndef LOG_ENABLED
+#define LOG_ENABLED 0
+#endif
+
+#if LOG_ENABLED
+#define LOG(fmt, ...) \
+    wprintf(L"[%hs::%u] " fmt L"\n", __FUNCTION__, (unsigned)__LINE__, __VA_ARGS__)
+#else
+#define LOG(...) ((void)0)
+#endif
+
 struct Args {
 	DWORD pid;
 	WCHAR procName[MAX_PATH];
@@ -37,11 +48,15 @@ static VOID ShowHelp()
 
 static BOOL StrCompare(LPCWSTR str1, LPCWSTR str2)
 {
+	LOG(L"Comparing arg values");
+
 	return lstrcmpiW(str1, str2) == 0;
 }
 
 static VOID FixQuotes(LPWSTR buf, SIZE_T size, LPCWSTR text)
 {
+	LOG(L"Fixing arg values");
+
 	BOOL needQuotes = (wcspbrk(text, L" \t") != 0);
 
 	SIZE_T curr = wcslen(buf);
@@ -65,6 +80,8 @@ static VOID FixQuotes(LPWSTR buf, SIZE_T size, LPCWSTR text)
 
 static BOOL IsElevated()
 {
+	LOG(L"Checking if elevated");
+
 	HANDLE token;
 
 	if (!OpenProcessToken(GetCurrentProcess(), TOKEN_QUERY, &token)) {
@@ -83,6 +100,8 @@ static BOOL IsElevated()
 
 static INT RunElevated()
 {
+	LOG(L"Launching elevated");
+
 	WCHAR path[MAX_PATH] = {};
 
 	if (!GetModuleFileNameW(0, path, MAX_PATH)) {
@@ -120,6 +139,8 @@ static INT RunElevated()
 
 static DWORD FindPidByName(LPCWSTR name)
 {
+	LOG(L"Finding PID by process name");
+
 	DWORD result = 0;
 
 	HANDLE snapshot = CreateToolhelp32Snapshot(TH32CS_SNAPPROCESS, 0);
@@ -139,7 +160,8 @@ static DWORD FindPidByName(LPCWSTR name)
 				result = entry.th32ProcessID;
 				break;
 			}
-		} while (Process32NextW(snapshot, &entry));
+		}
+		while (Process32NextW(snapshot, &entry));
 	}
 
 	CloseHandle(snapshot);
@@ -149,6 +171,8 @@ static DWORD FindPidByName(LPCWSTR name)
 
 static BOOL CALLBACK EnumWindows(HWND hwnd, LPARAM param)
 {
+	LOG(L"Querying open windows");
+
 	Window* window = (Window*)param;
 	DWORD pid = 0;
 
@@ -178,6 +202,8 @@ static BOOL CALLBACK EnumWindows(HWND hwnd, LPARAM param)
 
 static HWND GetWindow(DWORD pid, LPCWSTR title)
 {
+	LOG(L"Getting target window");
+
 	Window window = {};
 	window.targetPid = pid;
 	window.targetTitle = title;
@@ -190,6 +216,8 @@ static HWND GetWindow(DWORD pid, LPCWSTR title)
 
 static VOID HideBorder(HWND hwnd)
 {
+	LOG(L"Hiding window border");
+
 	const DWORD none = DWMWA_COLOR_NONE;
 
 	if (S_OK != DwmSetWindowAttribute(hwnd, DWMWA_BORDER_COLOR, &none, sizeof(none))) {
@@ -200,6 +228,8 @@ static VOID HideBorder(HWND hwnd)
 
 static VOID FixRendering(HWND hwnd)
 {
+	LOG(L"Fixing DWM rendering");
+
 	DWMNCRENDERINGPOLICY policy = DWMNCRP_DISABLED;
 
 	DwmSetWindowAttribute(hwnd, DWMWA_NCRENDERING_POLICY, &policy, sizeof(policy));
@@ -211,6 +241,8 @@ static VOID FixRendering(HWND hwnd)
 
 static VOID DisablePeek(HWND hwnd)
 {
+	LOG(L"Disabling window peek");
+
 	BOOL on = TRUE;
 
 	DwmSetWindowAttribute(hwnd, DWMWA_DISALLOW_PEEK, &on, sizeof(on));
@@ -219,6 +251,8 @@ static VOID DisablePeek(HWND hwnd)
 
 static BOOL FixWindowStyle(HWND hwnd)
 {
+	LOG(L"Applying new window style");
+
 	RECT rect;
 
 	if (!GetWindowRect(hwnd, &rect)) {
@@ -251,6 +285,8 @@ static BOOL FixWindowStyle(HWND hwnd)
 
 static VOID RefocusWindow(HWND hwnd)
 {
+	LOG(L"Refocusing window");
+
 	if (IsIconic(hwnd)) {
 		ShowWindow(hwnd, SW_RESTORE);
 	}
@@ -279,6 +315,8 @@ static VOID RefocusWindow(HWND hwnd)
 
 static VOID RefreshWindow(HWND hwnd)
 {
+	LOG(L"Refreshing window state");
+
 	RefocusWindow(hwnd);
 	ShowWindow(hwnd, SW_MINIMIZE);
 
@@ -301,8 +339,10 @@ static VOID RefreshWindow(HWND hwnd)
 	SetFocus(hwnd);
 }
 
-static VOID InitArgs(Args* args)
+static VOID ClearArgs(Args* args)
 {
+	LOG(L"Clearing arg values");
+
 	args->pid = 0;
 	args->procName[0] = 0;
 	args->title[0] = 0;
@@ -313,7 +353,9 @@ static VOID InitArgs(Args* args)
 
 static BOOL ParseArgs(Args* args)
 {
-	InitArgs(args);
+	LOG(L"Parsing arg values");
+
+	ClearArgs(args);
 
 	INT argc = 0;
 	LPWSTR* argv = CommandLineToArgvW(GetCommandLineW(), &argc);
@@ -365,6 +407,8 @@ static BOOL ParseArgs(Args* args)
 
 INT wmain()
 {
+	LOG(L"Starting");
+
 	Args args;
 
 	if (!ParseArgs(&args)) {
@@ -416,5 +460,8 @@ INT wmain()
 	RefreshWindow(window);
 
 	CloseHandle(processHandle);
+
+	LOG(L"Done");
+
 	return 0;
 }
