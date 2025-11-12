@@ -29,6 +29,7 @@ struct Args {
 	BOOL hasPid;
 	BOOL hasName;
 	BOOL hasTitle;
+	BOOL passthrough;
 };
 
 struct Window {
@@ -41,8 +42,8 @@ static VOID ShowHelp()
 {
 	wprintf(
 		L"usage:\n"
-		L"borderbegone.exe -pid 1111 -title \"hardware monitor\"\n"
-		L"borderbegone.exe -name MSIAfterburner.exe -title \"hardware monitor\""
+		L"borderbegone.exe -pid 1111 -title \"hardware monitor\" [-passthrough]\n"
+		L"borderbegone.exe -name MSIAfterburner.exe -title \"hardware monitor\" [-passthrough]"
 	);
 }
 
@@ -249,7 +250,7 @@ static VOID DisablePeek(HWND hwnd)
 	DwmSetWindowAttribute(hwnd, DWMWA_EXCLUDED_FROM_PEEK, &on, sizeof(on));
 }
 
-static BOOL FixWindowStyle(HWND hwnd)
+static BOOL FixWindowStyle(HWND hwnd, BOOL passthrough)
 {
 	LOG(L"Applying new window style");
 
@@ -267,6 +268,12 @@ static BOOL FixWindowStyle(HWND hwnd)
 
 	exStyle &= ~(WS_EX_WINDOWEDGE | WS_EX_CLIENTEDGE | WS_EX_DLGMODALFRAME | WS_EX_STATICEDGE | WS_EX_APPWINDOW);
 	exStyle |= WS_EX_TOOLWINDOW;
+
+	if (passthrough) {
+		exStyle |= WS_EX_TRANSPARENT;
+		exStyle |= WS_EX_LAYERED;
+		exStyle |= WS_EX_COMPOSITED;
+	}
 
 	SetWindowLongPtrW(hwnd, GWL_STYLE, style);
 	SetWindowLongPtrW(hwnd, GWL_EXSTYLE, exStyle);
@@ -349,6 +356,7 @@ static VOID ClearArgs(Args* args)
 	args->hasPid = FALSE;
 	args->hasName = FALSE;
 	args->hasTitle = FALSE;
+	args->passthrough = FALSE;
 }
 
 static BOOL ParseArgs(Args* args)
@@ -380,6 +388,9 @@ static BOOL ParseArgs(Args* args)
 		else if (StrCompare(arg, L"-title") && (i + 1) < argc) {
 			wcsncpy_s(args->title, argv[++i], _TRUNCATE);
 			args->hasTitle = TRUE;
+		}
+		else if (StrCompare(arg, L"-passthrough")) {
+			args->passthrough = TRUE;
 		}
 		else if (StrCompare(arg, L"-h") || StrCompare(arg, L"--help") || StrCompare(arg, L"/?")) {
 
@@ -450,7 +461,7 @@ INT wmain()
 
 	wprintf(L"Found window: 0x%p\n", window);
 
-	if (!FixWindowStyle(window)) {
+	if (!FixWindowStyle(window, args.passthrough)) {
 		wprintf(L"Failed to update window styles\n");
 		CloseHandle(processHandle);
 		return 6;
