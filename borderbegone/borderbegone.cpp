@@ -19,7 +19,7 @@
 #define LOG(fmt, ...) \
     wprintf(L"[%hs::%u] " fmt L"\n", __FUNCTION__, (unsigned)__LINE__, __VA_ARGS__)
 #else
-#define LOG(...) ((void)0)
+#define LOG(...) ((VOID)0)
 #endif
 
 struct Args {
@@ -30,6 +30,7 @@ struct Args {
 	BOOL hasName;
 	BOOL hasTitle;
 	BOOL passthrough;
+	BOOL topmost;
 };
 
 struct Window {
@@ -42,8 +43,8 @@ static VOID ShowHelp()
 {
 	wprintf(
 		L"usage:\n"
-		L"borderbegone.exe -pid 1111 -title \"hardware monitor\" [-passthrough]\n"
-		L"borderbegone.exe -name MSIAfterburner.exe -title \"hardware monitor\" [-passthrough]"
+		L"borderbegone.exe -pid 1111 -title \"hardware monitor\" [-passthrough] [-topmost]\n"
+		L"borderbegone.exe -name MSIAfterburner.exe -title \"hardware monitor\" [-passthrough] [-topmost]"
 	);
 }
 
@@ -250,7 +251,7 @@ static VOID DisablePeek(HWND hwnd)
 	DwmSetWindowAttribute(hwnd, DWMWA_EXCLUDED_FROM_PEEK, &on, sizeof(on));
 }
 
-static BOOL FixWindowStyle(HWND hwnd, BOOL passthrough)
+static BOOL FixWindowStyle(HWND hwnd, BOOL passthrough, BOOL topmost)
 {
 	LOG(L"Applying new window style");
 
@@ -275,6 +276,10 @@ static BOOL FixWindowStyle(HWND hwnd, BOOL passthrough)
 		exStyle |= WS_EX_COMPOSITED;
 	}
 
+	if (topmost) {
+		exStyle |= WS_EX_TOPMOST;
+	}
+
 	SetWindowLongPtrW(hwnd, GWL_STYLE, style);
 	SetWindowLongPtrW(hwnd, GWL_EXSTYLE, exStyle);
 
@@ -282,7 +287,17 @@ static BOOL FixWindowStyle(HWND hwnd, BOOL passthrough)
 	HideBorder(hwnd);
 	DisablePeek(hwnd);
 
-	if (!SetWindowPos(hwnd, 0, rect.left, rect.top, (rect.right - rect.left), (rect.bottom - rect.top), SWP_NOZORDER | SWP_NOACTIVATE | SWP_FRAMECHANGED)) {
+	UINT swpFlags = SWP_NOACTIVATE | SWP_FRAMECHANGED;
+	HWND insertAfter = 0;
+
+	if (!topmost) {
+		swpFlags |= SWP_NOZORDER;
+	}
+	else {
+		insertAfter = HWND_TOPMOST;
+	}
+
+	if (!SetWindowPos(hwnd, insertAfter, rect.left, rect.top, (rect.right - rect.left), (rect.bottom - rect.top), swpFlags)) {
 		wprintf(L"SetWindowPos failed: %lu\n", GetLastError());
 		return FALSE;
 	}
@@ -290,7 +305,7 @@ static BOOL FixWindowStyle(HWND hwnd, BOOL passthrough)
 	return TRUE;
 }
 
-static VOID RefocusWindow(HWND hwnd)
+static VOID RefocusWindow(HWND hwnd, BOOL topmost)
 {
 	LOG(L"Refocusing window");
 
@@ -311,7 +326,7 @@ static VOID RefocusWindow(HWND hwnd)
 		AttachThreadInput(targetThread, fgThread, TRUE);
 	}
 
-	SetWindowPos(hwnd, HWND_TOP, 0, 0, 0, 0, SWP_NOMOVE | SWP_NOSIZE);
+	SetWindowPos(hwnd, topmost ? HWND_TOPMOST : HWND_TOP, 0, 0, 0, 0, SWP_NOMOVE | SWP_NOSIZE);
 	SetForegroundWindow(hwnd);
 	SetActiveWindow(hwnd);
 	SetFocus(hwnd);
@@ -320,11 +335,11 @@ static VOID RefocusWindow(HWND hwnd)
 		AttachThreadInput(targetThread, fgThread, FALSE);
 }
 
-static VOID RefreshWindow(HWND hwnd)
+static VOID RefreshWindow(HWND hwnd, BOOL topmost)
 {
 	LOG(L"Refreshing window state");
 
-	RefocusWindow(hwnd);
+	RefocusWindow(hwnd, topmost);
 	ShowWindow(hwnd, SW_MINIMIZE);
 
 	DWORD ticks = GetTickCount();
@@ -340,7 +355,7 @@ static VOID RefreshWindow(HWND hwnd)
 		Sleep(10);
 	}
 
-	SetWindowPos(hwnd, HWND_TOP, 0, 0, 0, 0, SWP_NOMOVE | SWP_NOSIZE);
+	SetWindowPos(hwnd, topmost ? HWND_TOPMOST : HWND_TOP, 0, 0, 0, 0, SWP_NOMOVE | SWP_NOSIZE);
 	SetForegroundWindow(hwnd);
 	SetActiveWindow(hwnd);
 	SetFocus(hwnd);
@@ -357,6 +372,7 @@ static VOID ClearArgs(Args* args)
 	args->hasName = FALSE;
 	args->hasTitle = FALSE;
 	args->passthrough = FALSE;
+	args->topmost = FALSE;
 }
 
 static BOOL ParseArgs(Args* args)
@@ -391,6 +407,9 @@ static BOOL ParseArgs(Args* args)
 		}
 		else if (StrCompare(arg, L"-passthrough")) {
 			args->passthrough = TRUE;
+		}
+		else if (StrCompare(arg, L"-topmost")) {
+			args->topmost = TRUE;
 		}
 		else if (StrCompare(arg, L"-h") || StrCompare(arg, L"--help") || StrCompare(arg, L"/?")) {
 
@@ -461,14 +480,14 @@ INT wmain()
 
 	wprintf(L"Found window: 0x%p\n", window);
 
-	if (!FixWindowStyle(window, args.passthrough)) {
+	if (!FixWindowStyle(window, args.passthrough, args.topmost)) {
 		wprintf(L"Failed to update window styles\n");
 		CloseHandle(processHandle);
 		return 6;
 	}
 
-	RefocusWindow(window);
-	RefreshWindow(window);
+	RefocusWindow(window, args.topmost);
+	RefreshWindow(window, args.topmost);
 
 	CloseHandle(processHandle);
 
