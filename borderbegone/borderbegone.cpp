@@ -31,6 +31,7 @@ struct Args {
 	BOOL hasTitle;
 	BOOL passthrough;
 	BOOL topmost;
+	BOOL drag;
 };
 
 struct Window {
@@ -39,12 +40,18 @@ struct Window {
 	HWND found;
 };
 
+static HHOOK mouseHook = 0;
+static HWND dragWindow = 0;
+static BOOL dragging = FALSE;
+static POINT dragOffset = {};
+
 static VOID ShowHelp()
 {
 	wprintf(
 		L"usage:\n"
-		L"borderbegone.exe -pid 1111 -title \"hardware monitor\" [-passthrough] [-topmost]\n"
-		L"borderbegone.exe -name MSIAfterburner.exe -title \"hardware monitor\" [-passthrough] [-topmost]"
+		L"borderbegone.exe -pid 1111 -title \"hardware monitor\" [-passthrough] [-topmost] [-drag]\n"
+		L"borderbegone.exe -name MSIAfterburner.exe -title \"hardware monitor\" [-passthrough] [-topmost] [-drag]\n"
+		L"note: -drag and -passthrough cannot be combined"
 	);
 }
 
@@ -373,6 +380,7 @@ static VOID ClearArgs(Args* args)
 	args->hasTitle = FALSE;
 	args->passthrough = FALSE;
 	args->topmost = FALSE;
+	args->drag = FALSE;
 }
 
 static BOOL ParseArgs(Args* args)
@@ -411,6 +419,9 @@ static BOOL ParseArgs(Args* args)
 		else if (StrCompare(arg, L"-topmost")) {
 			args->topmost = TRUE;
 		}
+		else if (StrCompare(arg, L"-drag")) {
+			args->drag = TRUE;
+		}
 		else if (StrCompare(arg, L"-h") || StrCompare(arg, L"--help") || StrCompare(arg, L"/?")) {
 
 			if (argv) {
@@ -435,6 +446,137 @@ static BOOL ParseArgs(Args* args)
 	return TRUE;
 }
 
+static BOOL IsTargetWindow(HWND hwnd)
+{
+	LOG(L"Checking if target window");
+
+	if (!hwnd || !dragWindow) {
+		return FALSE;
+	}
+
+	HWND root = GetAncestor(hwnd, GA_ROOT);
+	return (root == dragWindow);
+}
+
+static BOOL UpdateDraggedWindow(POINT pt)
+{
+	LOG(L"Updating dragged window");
+
+	if (!IsWindow(dragWindow)) {
+		PostQuitMessage(0);
+		return FALSE;
+	}
+
+	RECT rect = {};
+
+	if (!GetWindowRect(dragWindow, &rect)) {
+		return FALSE;
+	}
+
+	const INT x = pt.x - dragOffset.x;
+	const INT y = pt.y - dragOffset.y;
+
+	return SetWindowPos(dragWindow, 0, x, y, 0, 0, SWP_NOZORDER | SWP_NOSIZE | SWP_NOACTIVATE);
+}
+
+static LRESULT CALLBACK LowLevelMouseProc(INT nCode, WPARAM wParam, LPARAM lParam)
+{
+	LOG(L"Drag hook active");
+
+	if (nCode < 0) {
+		return CallNextHookEx(mouseHook, nCode, wParam, lParam);
+	}
+
+	const MSLLHOOKSTRUCT* info = (const MSLLHOOKSTRUCT*)lParam;
+
+	if (!info) {
+		return CallNextHookEx(mouseHook, nCode, wParam, lParam);
+	}
+
+	switch (wParam) {
+	case WM_LBUTTONDOWN: {
+		HWND target = WindowFromPoint(info->pt);
+		if (IsTargetWindow(target)) {
+			RECT rect = {};
+			if (GetWindowRect(dragWindow, &rect)) {
+				dragging = TRUE;
+				dragOffset.x = info->pt.x - rect.left;
+				dragOffset.y = info->pt.y - rect.top;
+			}
+		}
+		break;
+	}
+	case WM_LBUTTONUP: {
+		dragging = FALSE;
+		break;
+	}
+	case WM_MOUSEMOVE: {
+		if (dragging) {
+			UpdateDraggedWindow(info->pt);
+		}
+		break;
+	}
+	default:
+		break;
+	}
+
+	return CallNextHookEx(mouseHook, nCode, wParam, lParam);
+}
+
+static BOOL EnableDrag(HWND hwnd)
+{
+	LOG(L"Dragging enabled");
+
+	dragWindow = hwnd;
+
+	mouseHook = SetWindowsHookExW(WH_MOUSE_LL, LowLevelMouseProc, 0, 0);
+
+	if (!mouseHook) {
+		wprintf(L"Failed to enable drag hook: %lu\n", GetLastError());
+		return FALSE;
+	}
+
+	wprintf(L"Drag mode enabled\n");
+
+    MSG msg;
+
+    for (;;) {
+		
+		if (!IsWindow(dragWindow)) {
+			PostQuitMessage(0);
+		}
+
+        if (PeekMessageW(&msg, 0, 0, 0, PM_REMOVE)) {
+			
+			if (msg.message == WM_QUIT) {
+				break;
+			}
+			
+			TranslateMessage(&msg);
+			DispatchMessageW(&msg);
+
+			continue;
+		}
+		
+		DWORD wait = MsgWaitForMultipleObjectsEx(0, 0, 100, QS_ALLINPUT, MWMO_INPUTAVAILABLE);
+		
+		if (wait == WAIT_FAILED) {
+			wprintf(L"MsgWaitForMultipleObjectsEx failed: %lu\n", GetLastError());
+			break;
+		}
+	}
+
+	UnhookWindowsHookEx(mouseHook);
+
+	wprintf(L"Drag mode disabled\n");
+
+	mouseHook = 0;
+	dragWindow = 0;
+	dragging = FALSE;
+
+	return TRUE;
+}
+
 INT wmain()
 {
 	LOG(L"Starting");
@@ -444,6 +586,11 @@ INT wmain()
 	if (!ParseArgs(&args)) {
 		ShowHelp();
 		return 2;
+	}
+
+	if (args.drag && args.passthrough) {
+		wprintf(L"-drag and -passthrough cannot be used together\n");
+		return 8;
 	}
 
 	//need elevation to fix afterburner
@@ -490,6 +637,12 @@ INT wmain()
 	RefreshWindow(window, args.topmost);
 
 	CloseHandle(processHandle);
+
+	if (args.drag) {
+		if (!EnableDrag(window)) {
+			return 7;
+		}
+	}
 
 	LOG(L"Done");
 
