@@ -448,6 +448,8 @@ static BOOL ParseArgs(Args* args)
 
 static BOOL IsTargetWindow(HWND hwnd)
 {
+	LOG(L"Checking if target window");
+
 	if (!hwnd || !dragWindow) {
 		return FALSE;
 	}
@@ -458,6 +460,8 @@ static BOOL IsTargetWindow(HWND hwnd)
 
 static BOOL UpdateDraggedWindow(POINT pt)
 {
+	LOG(L"Updating dragged window");
+
 	if (!IsWindow(dragWindow)) {
 		PostQuitMessage(0);
 		return FALSE;
@@ -477,6 +481,8 @@ static BOOL UpdateDraggedWindow(POINT pt)
 
 static LRESULT CALLBACK LowLevelMouseProc(INT nCode, WPARAM wParam, LPARAM lParam)
 {
+	LOG(L"Drag hook active");
+
 	if (nCode < 0) {
 		return CallNextHookEx(mouseHook, nCode, wParam, lParam);
 	}
@@ -519,6 +525,8 @@ static LRESULT CALLBACK LowLevelMouseProc(INT nCode, WPARAM wParam, LPARAM lPara
 
 static BOOL EnableDrag(HWND hwnd)
 {
+	LOG(L"Dragging enabled");
+
 	dragWindow = hwnd;
 
 	mouseHook = SetWindowsHookExW(WH_MOUSE_LL, LowLevelMouseProc, 0, 0);
@@ -530,14 +538,37 @@ static BOOL EnableDrag(HWND hwnd)
 
 	wprintf(L"Drag mode enabled\n");
 
-	MSG msg;
+    MSG msg;
 
-	while (GetMessageW(&msg, 0, 0, 0) > 0) {
-		TranslateMessage(&msg);
-		DispatchMessageW(&msg);
+    for (;;) {
+		
+		if (!IsWindow(dragWindow)) {
+			PostQuitMessage(0);
+		}
+
+        if (PeekMessageW(&msg, 0, 0, 0, PM_REMOVE)) {
+			
+			if (msg.message == WM_QUIT) {
+				break;
+			}
+			
+			TranslateMessage(&msg);
+			DispatchMessageW(&msg);
+
+			continue;
+		}
+		
+		DWORD wait = MsgWaitForMultipleObjectsEx(0, 0, 100, QS_ALLINPUT, MWMO_INPUTAVAILABLE);
+		
+		if (wait == WAIT_FAILED) {
+			wprintf(L"MsgWaitForMultipleObjectsEx failed: %lu\n", GetLastError());
+			break;
+		}
 	}
 
 	UnhookWindowsHookEx(mouseHook);
+
+	wprintf(L"Drag mode disabled\n");
 
 	mouseHook = 0;
 	dragWindow = 0;
